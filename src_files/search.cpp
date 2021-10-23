@@ -294,7 +294,7 @@ Score Search::pvSearch(Board* b, Score alpha, Score beta, Depth depth, Depth ply
 
     // if the time is over, we fail hard to stop the search. We don't want to call the system clock
     // too often for speed reasons so we only apply this when the depth is larger than 6.
-    if ((depth > 6 && !isTimeLeft())) {
+    if ((depth > 6 && !isTimeLeft(&td->searchData))) {
         td->dropOut = true;
         return beta;
     }
@@ -326,12 +326,7 @@ Score Search::pvSearch(Board* b, Score alpha, Score beta, Depth depth, Depth ply
 
     // depth > MAX_PLY means that it overflowed because depth is unsigned.
     if (depth == 0 || depth > MAX_PLY) {
-        // Don't drop into qsearch if in check
-        if (inCheck) {
-            depth++;
-        } else {
-            return qSearch(b, alpha, beta, ply, td);
-        }
+        return qSearch(b, alpha, beta, ply, td, inCheck);
     }
 
     // we extract a lot of information about various things.
@@ -584,7 +579,7 @@ Score Search::pvSearch(Board* b, Score alpha, Score beta, Depth depth, Depth ply
 
         if (ply > 0 && legalMoves >= 1 && highestScore > -MIN_MATE_SCORE) {
 
-            Depth moveDepth = std::max(1, depth - lmrReductions[depth][legalMoves]);
+            Depth moveDepth = std::max(1, 1 + depth - lmrReductions[depth][legalMoves]);
 
             if (quiet) {
                 quiets++;
@@ -597,10 +592,6 @@ Score Search::pvSearch(Board* b, Score alpha, Score beta, Depth depth, Depth ply
                     moveOrderer.skip = true;
                     continue;
                 }
-                
-                // prune quiet moves that are unlikely to improve alpha
-                if (!inCheck && moveDepth < 3 && sd->maxImprovement[getSquareFrom(m)][getSquareTo(m)] +  30 + sd->eval[b->getActivePlayer()][ply] < alpha)
-                    continue;
                 
                 // prune quiet moves that are unlikely to improve alpha
                 if (!inCheck && moveDepth <= 7 && sd->maxImprovement[getSquareFrom(m)][getSquareTo(m)] +  moveDepth * FUTILITY_MARGIN + 100 + sd->eval[b->getActivePlayer()][ply] < alpha)
@@ -710,6 +701,8 @@ Score Search::pvSearch(Board* b, Score alpha, Score beta, Depth depth, Depth ply
             lmr = lmr - history / 150;
             lmr += !isImproving;
             lmr -= pv;
+            if (!sd->targetReached) 
+                lmr++;
             if (sd->isKiller(m, ply, b->getActivePlayer()))
                 lmr--;
             if (sd->reduce && sd->sideToReduce != b->getActivePlayer())
@@ -733,7 +726,7 @@ Score Search::pvSearch(Board* b, Score alpha, Score beta, Depth depth, Depth ply
         if (extension == 0 && b->isInCheck(b->getActivePlayer()))
             extension = 1;
 
-        mv->scoreMove(moveOrderer.counter - 1, depth);
+        mv->scoreMove(moveOrderer.counter - 1, depth + (staticEval < alpha));
 
         // principal variation search recursion.
         if (legalMoves == 0) {
@@ -933,7 +926,7 @@ Score Search::qSearch(Board* b, Score alpha, Score beta, Depth ply, ThreadData* 
     MoveList* mv = &sd->moves[ply];
 
     // create a moveorderer to sort the moves during the search
-    generateNonQuietMoves(b, mv);
+    generateNonQuietMoves(b, mv, 0, sd, ply, inCheck);
     MoveOrderer moveOrderer {mv};
 
     // keping track of the best move for the transpositions
@@ -942,7 +935,7 @@ Score Search::qSearch(Board* b, Score alpha, Score beta, Depth ply, ThreadData* 
     for (int i = 0; i < mv->getSize(); i++) {
 
         Move m = moveOrderer.next(0);
-
+        
         // do not consider illegal moves
         if (!b->isLegal(m))
             continue;
@@ -958,9 +951,12 @@ Score Search::qSearch(Board* b, Score alpha, Score beta, Depth ply, ThreadData* 
         // if the depth is small enough and the static exchange evaluation for the given move is very
         // negative, dont consider this quiet move as well.
         // *******************************************************************************************
-        if (!inCheck && (getCapturedPieceType(m)) < (getMovingPieceType(m))
-            && b->staticExchangeEvaluation(m) < 0)
+        Score see = (!inCheck && (isCapture(m) || isPromotion(m))) ? b->staticExchangeEvaluation(m) : 0;
+        if (see < 0)
             continue;
+        if (see + stand_pat > beta + 200)
+            return beta;
+        
 
         b->move(m);
         __builtin_prefetch(&table->m_entries[b->getBoardStatus()->zobrist & table->m_mask]);
@@ -986,6 +982,8 @@ Score Search::qSearch(Board* b, Score alpha, Score beta, Depth ply, ThreadData* 
                 alpha      = score;
             }
         }
+        if (!isCapture(m) && !isPromotion(m))
+            break;
     }
 
     // store the current position inside the transposition table
@@ -1042,7 +1040,7 @@ U64 Search::tbHits() {
     }
     return th;
 }
-bool           Search::isTimeLeft() { return timeManager->isTimeLeft(); }
+bool           Search::isTimeLeft(SearchData* sd) { return timeManager->isTimeLeft(sd); }
 bool           Search::rootTimeLeft(int score) { return timeManager->rootTimeLeft(score); }
 SearchOverview Search::overview() { return this->searchOverview; }
 void           Search::enableInfoStrings() { this->printInfo = true; }
