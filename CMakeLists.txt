@@ -25,6 +25,8 @@ add_executable(Koivisto
         src_files/eval.h
         src_files/MoveOrderer.cpp
         src_files/MoveOrderer.h
+        src_files/newmovegen.cpp
+        src_files/newmovegen.h
         src_files/History.cpp
         src_files/History.h
         src_files/Verification.h
@@ -46,8 +48,8 @@ add_executable(Koivisto
         src_files/incbin/incbin.h)
 
 add_definitions(-DEVALFILE=\"../networks/default.net\")
-add_definitions(-DMINOR_VERSION=16)
-add_definitions(-DMAJOR_VERSION=6)
+add_definitions(-DMINOR_VERSION=0)
+add_definitions(-DMAJOR_VERSION=7)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -flto")
